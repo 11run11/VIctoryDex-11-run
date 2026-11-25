@@ -1106,10 +1106,19 @@ mod tests {
         assert_eq!(create(HeapDesc { kind: 0, count: 8, flags: 1, nodes: 0 }, Placement { address: 0, size: 0 }, &mut object), S_OK);
         let heap = heap(object);
         let host = heap.host().unwrap();
-        // Fixed range to keep the 4 KiB tiles aligned, as in the title's texture heap.
-        let addr = unsafe { VirtualAlloc(std::ptr::null(), 2 << 20, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE) } as u64;
-        assert_ne!(addr, 0);
         let color = [3, 0, 0, 0, 1024, 0, 512, 0x8_0001, 72, 1, 0, 0x105, 0, 0];
+        let small = crate::resource::placed_bytes_from(&color, 4).unwrap();
+        let mut writer = color;
+        writer[8] = 28;
+        writer[12] = 1;
+        let writer_bytes = crate::resource::placed_bytes(&writer).unwrap();
+        // The cached writer and sampled views retain these addresses for the process lifetime.
+        // SAFETY: reserve the writer's entire footprint and place each view inside that allocation.
+        let base = unsafe {
+            VirtualAlloc(std::ptr::null(), writer_bytes.try_into().unwrap(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+        } as u64;
+        assert_ne!(base, 0);
+        let addr = base + small;
         let put = |slot, at: u64, first: u32| {
             let mut srv = [0u32; 16];
             srv[0] = 72;
@@ -1121,8 +1130,11 @@ mod tests {
             srv[11] = (at >> 32) as u32;
             let mut shape = color;
             if slot == 2 { shape[4] = 2048; }
+            let bytes = crate::resource::placed_bytes_from(&shape, first).unwrap();
+            assert!(base <= at && at + bytes <= base + writer_bytes);
             create_placed_srv(null, &shape, &srv, heap.handle(slot).unwrap());
         };
+        let _frame_guard = crate::frame::TEST_FRAME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let frame = crate::frame::current();
         let clear = |s| create_cbv(null, &[0x400, 6, 256, 0], heap.handle(s).unwrap());
         put(1, addr, 4);
@@ -1130,7 +1142,6 @@ mod tests {
         put(2, addr, 1);
         assert!(host.demand_material_texture(heap, 1, stamp, frame).is_none(), "a different current owner");
         clear(2);
-        let small = crate::resource::placed_bytes_from(&color, 4).unwrap();
         assert!(small < crate::resource::placed_bytes(&color).unwrap());
         put(3, addr + small, 0); // touches the nominal interval, starts after the visible mips
         let revived = host.demand_material_texture(heap, 1, stamp, frame).unwrap();
@@ -1151,10 +1162,7 @@ mod tests {
         put(2, addr, 1);
         clear(2);
         // A copied/renderable texture starting earlier can overlap the view.
-        let mut writer = color;
-        writer[8] = 28;
-        writer[12] = 1;
-        let _writer = crate::resource::texture_at(addr - small, &writer).unwrap();
+        let _writer = crate::resource::texture_at(base, &writer).unwrap();
         assert!(host.demand_material_texture(heap, 1, new_stamp, frame).is_none(), "GPU-writable owner");
         assert_eq!(release(object), 0);
     }
