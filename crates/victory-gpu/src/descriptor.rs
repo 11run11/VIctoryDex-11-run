@@ -1228,6 +1228,7 @@ mod tests {
         tex_view[10] = addr as u32;
         tex_view[11] = (addr >> 32) as u32;
         create_placed_srv(null, &tex, &tex_view, heap.handle(3).unwrap());
+        let _frame_guard = crate::frame::TEST_FRAME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let frame = crate::frame::current();
         let stamp = host.material_write_stamp();
         let write = host.demand_material_texture(heap, 3, stamp, frame).unwrap();
