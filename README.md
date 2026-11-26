@@ -4,6 +4,8 @@ DexNom RayTime is a community fork of Marvisak's VIctory for Windows x64. It run
 
 AMD Radeon is the primary target and the best-tested GPU path for this build. NVIDIA users can try the launcher with `--no-rt` and the game's display path. The NVIDIA configuration is untested. The current performance priorities are reducing VRAM use and improving FPS and frame-time stability.
 
+The Radeon FSR Quality 4K build is our most stable tested baseline for shaders and texture streaming. See [Things to Be Done](#things-to-be-done) for open work and how to measure a contribution.
+
 ## Tested PC
 
 | Component | Test system |
@@ -48,6 +50,16 @@ For a manual launch, use the same flags as the Quality shortcut.
 The **DexNom RayTime (Experimental RT)** shortcut enables ray tracing with the game's display path. The shortcuts share your local saves.
 
 Chapter 1 City produced in-range ray and triangle intersections on an RX 7900 XTX. The game builds and traverses its acceleration structures through translated Direct3D 12 compute shaders. Frame times can still reach several seconds. Interior lighting, shadows and performance vary by scene. [Ray-tracing implementation](docs/fork-ray-tracing.md) · [City testing](BENCHMARK.md)
+
+## Things to Be Done
+
+A fresh public download reached the City waterfront on an RX 7900 XTX with FSR 4.1.2 and ray tracing enabled. The first in-game frames took longer while pipelines compiled. Warm samples reached about 1.1–1.3 FPS with zero dropped draws. Some materials still rendered black.
+
+- **Reduce buffer copy-back.** Track which pages the GPU actually writes and read back the ranges needed by CPU consumers. Start with the ray-tracing header builder, which declares much broader write ranges than it uses. Check fence ordering, CPU writes, aliases, and remaps when narrowing synchronization. [Submission and readback](crates/victory-gpu/src/host.rs) · [Buffer snapshots](crates/victory-gpu/src/shadow.rs) · [Guest memory directory](crates/victory-gpu/src/memory.rs)
+- **Reduce VRAM use and stabilize texture streaming.** Measure local VRAM and GPU-shared system memory separately. Look for duplicate resident resources, oversized staging allocations, and repeated mip uploads. Keep a valid resident mip available until its replacement has finished uploading. For black materials, trace the draw's base color back to the bound texture and mip. [Texture residency](crates/victory-gpu/src/texture.rs) · [Texture descriptors](crates/victory-gpu/src/descriptor/host.rs)
+- **Improve frame-time stability.** Measure cold pipeline compilation and warm gameplay separately. Look for CPU waits on buffer publication, repeated uploads, and pipeline work that can be prepared before the first draw. Compare pipeline counts and the rendered scene to check for regressions. [Shader translation](crates/victory-shader/src/emit) · [Pipeline creation](crates/victory-gpu/src/pipeline.rs)
+
+For a before-and-after test, use the same scene, camera, and driver with ray tracing on and FSR Quality at 1440p → 4K. Report median and 95th-percentile frame times, dedicated and shared GPU memory, upload and copy-back time and bytes, and dropped draws or pending pipelines. Include the commit, hardware, and relevant log lines. [Benchmark notes](BENCHMARK.md)
 
 ## Changes in this snapshot
 
